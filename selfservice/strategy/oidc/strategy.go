@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/oauth2"
 	"net/http"
 	"net/url"
 	"strings"
@@ -291,6 +292,18 @@ func (s *Strategy) alreadyAuthenticated(w http.ResponseWriter, r *http.Request, 
 	return false
 }
 
+func (s *Strategy) RefreshToken(ctx context.Context, t *oauth2.Token, pid string) (*oauth2.Token, error) {
+	provider, err := s.provider(pid)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := provider.OAuth2(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return cfg.TokenSource(ctx, t).Token()
+}
+
 func (s *Strategy) handleCallback(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	var (
 		code = r.URL.Query().Get("code")
@@ -337,10 +350,10 @@ func (s *Strategy) handleCallback(w http.ResponseWriter, r *http.Request, ps htt
 
 	switch a := req.(type) {
 	case *login.Request:
-		s.processLogin(w, r, a, claims, provider, container)
+		s.processLogin(w, r, a, claims, provider, container, token)
 		return
 	case *registration.Request:
-		s.processRegistration(w, r, a, claims, provider, container)
+		s.processRegistration(w, r, a, claims, provider, container, token)
 		return
 	case *settings.Request:
 		sess, err := s.d.SessionManager().FetchFromRequest(r.Context(), r)

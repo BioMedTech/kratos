@@ -2,6 +2,7 @@ package registration
 
 import (
 	"errors"
+	"golang.org/x/oauth2"
 	"net/http"
 	"time"
 
@@ -98,6 +99,50 @@ func (e *HookExecutor) PostRegistrationHook(w http.ResponseWriter, r *http.Reque
 		Debug("A new identity has registered using self-service registration. Running post execution hooks.")
 
 	s := session.NewSession(i, e.c, time.Now().UTC())
+	for _, executor := range e.d.PostRegistrationPostPersistHooks(ct) {
+		if err := executor.ExecutePostRegistrationPostPersistHook(w, r, a, s); err != nil {
+			if errors.Is(err, ErrHookAbortRequest) {
+				return nil
+			}
+			return err
+		}
+	}
+
+	e.d.Logger().
+		WithField("identity_id", i.ID).
+		Debug("Post registration execution hooks completed successfully.")
+
+	return x.SecureContentNegotiationRedirection(w, r, s.Declassify(), a.RequestURL,
+		e.d.Writer(), e.c, x.SecureRedirectOverrideDefaultReturnTo(e.c.SelfServiceFlowRegistrationReturnTo(ct.String())))
+}
+
+func (e *HookExecutor) PostRegistrationOIDCHook(w http.ResponseWriter, r *http.Request, ct identity.CredentialsType, a *Request, i *identity.Identity, token *oauth2.Token, provider string) error {
+	for _, executor := range e.d.PostRegistrationPrePersistHooks(ct) {
+		if err := executor.ExecutePostRegistrationPrePersistHook(w, r, a, i); err != nil {
+			if errors.Is(err, ErrHookAbortRequest) {
+				return nil
+			}
+			return err
+		}
+	}
+
+	// We need to make sure that the identity has a valid schema before passing it down to the identity pool.
+	if err := e.d.IdentityValidator().Validate(i); err != nil {
+		return err
+		// We're now creating the identity because any of the hooks could trigger a "redirect" or a "session" which
+		// would imply that the identity has to exist already.
+	} else if err := e.d.IdentityManager().Create(r.Context(), i); err != nil {
+		if errors.Is(err, sqlcon.ErrUniqueViolation) {
+			return schema.NewDuplicateCredentialsError()
+		}
+		return err
+	}
+
+	e.d.Logger().
+		WithField("identity_id", i.ID).
+		Debug("A new identity has registered using self-service registration. Running post execution hooks.")
+
+	s := session.NewOIDCSession(i, token, time.Now().UTC(), provider)
 	for _, executor := range e.d.PostRegistrationPostPersistHooks(ct) {
 		if err := executor.ExecutePostRegistrationPostPersistHook(w, r, a, s); err != nil {
 			if errors.Is(err, ErrHookAbortRequest) {

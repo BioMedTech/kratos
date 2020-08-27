@@ -1,6 +1,7 @@
 package login
 
 import (
+	"golang.org/x/oauth2"
 	"net/http"
 	"time"
 
@@ -51,7 +52,29 @@ func NewHookExecutor(d executorDependencies, c configuration.Provider) *HookExec
 }
 
 func (e *HookExecutor) PostLoginHook(w http.ResponseWriter, r *http.Request, ct identity.CredentialsType, a *Request, i *identity.Identity) error {
+
 	s := session.NewSession(i, e.c, time.Now().UTC()).Declassify()
+
+	for _, executor := range e.d.PostLoginHooks(ct) {
+		if err := executor.ExecuteLoginPostHook(w, r, a, s); err != nil {
+			if errors.Is(err, ErrHookAbortRequest) {
+				e.d.Logger().Warn("A successful login attempt was aborted because a hook returned ErrHookAbortRequest.")
+				return nil
+			}
+			return err
+		}
+	}
+
+	if err := e.d.SessionManager().CreateToRequest(r.Context(), w, r, s); err != nil {
+		return errors.WithStack(err)
+	}
+
+	return x.SecureContentNegotiationRedirection(w, r, s.Declassify(), a.RequestURL,
+		e.d.Writer(), e.c, x.SecureRedirectOverrideDefaultReturnTo(e.c.SelfServiceFlowLoginReturnTo(ct.String())))
+}
+
+func (e *HookExecutor) PostLoginOIDCHook(w http.ResponseWriter, r *http.Request, ct identity.CredentialsType, a *Request, i *identity.Identity, token *oauth2.Token, provider string) error {
+	s := session.NewOIDCSession(i, token, time.Now().UTC(), provider).Declassify()
 
 	for _, executor := range e.d.PostLoginHooks(ct) {
 		if err := executor.ExecuteLoginPostHook(w, r, a, s); err != nil {

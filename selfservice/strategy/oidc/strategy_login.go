@@ -3,6 +3,7 @@ package oidc
 import (
 	"bytes"
 	"encoding/json"
+	"golang.org/x/oauth2"
 	"net/http"
 
 	"github.com/pkg/errors"
@@ -30,7 +31,7 @@ func (s *Strategy) PopulateLoginMethod(r *http.Request, sr *login.Request) error
 	return nil
 }
 
-func (s *Strategy) processLogin(w http.ResponseWriter, r *http.Request, a *login.Request, claims *Claims, provider Provider, container *authCodeContainer) {
+func (s *Strategy) processLogin(w http.ResponseWriter, r *http.Request, a *login.Request, claims *Claims, provider Provider, container *authCodeContainer, token *oauth2.Token) {
 	i, c, err := s.d.PrivilegedIdentityPool().FindByCredentialsIdentifier(r.Context(), identity.CredentialsTypeOIDC, uid(provider.Config().ID, claims.Subject))
 	if err != nil {
 		if errors.Is(err, herodot.ErrNotFound) {
@@ -52,7 +53,7 @@ func (s *Strategy) processLogin(w http.ResponseWriter, r *http.Request, a *login
 				return
 			}
 
-			s.processRegistration(w, r, aa, claims, provider, container)
+			s.processRegistration(w, r, aa, claims, provider, container, token)
 			return
 		}
 
@@ -68,7 +69,7 @@ func (s *Strategy) processLogin(w http.ResponseWriter, r *http.Request, a *login
 
 	for _, c := range o.Providers {
 		if c.Subject == claims.Subject && c.Provider == provider.Config().ID {
-			if err = s.d.LoginHookExecutor().PostLoginHook(w, r, identity.CredentialsTypeOIDC, a, i); err != nil {
+			if err = s.d.LoginHookExecutor().PostLoginOIDCHook(w, r, identity.CredentialsTypeOIDC, a, i, token, provider.Config().Provider); err != nil {
 				s.handleError(w, r, a.GetID(), provider.Config().ID, nil, err)
 				return
 			}

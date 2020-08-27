@@ -392,7 +392,15 @@ func (m *RegistryDefault) Tracer() *tracing.Tracer {
 
 func (m *RegistryDefault) SessionManager() session.Manager {
 	if m.sessionManager == nil {
-		m.sessionManager = session.NewManagerHTTP(m.c, m)
+		var oidcStrategies *oidc.Strategy
+
+		for _, s := range m.loginStrategies {
+			if s.ID() == identity.CredentialsTypeOIDC {
+				oidcStrategies = s.(*oidc.Strategy)
+				break
+			}
+		}
+		m.sessionManager = session.NewManagerHTTPOIDC(m.c, m, oidcStrategies)
 	}
 	return m.sessionManager
 }

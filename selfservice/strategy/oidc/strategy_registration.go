@@ -3,6 +3,7 @@ package oidc
 import (
 	"bytes"
 	"encoding/json"
+	"golang.org/x/oauth2"
 	"net/http"
 
 	"github.com/google/go-jsonnet"
@@ -43,7 +44,7 @@ func (s *Strategy) PopulateRegistrationMethod(r *http.Request, sr *registration.
 	return nil
 }
 
-func (s *Strategy) processRegistration(w http.ResponseWriter, r *http.Request, a *registration.Request, claims *Claims, provider Provider, container *authCodeContainer) {
+func (s *Strategy) processRegistration(w http.ResponseWriter, r *http.Request, a *registration.Request, claims *Claims, provider Provider, container *authCodeContainer, token *oauth2.Token) {
 	if _, _, err := s.d.PrivilegedIdentityPool().FindByCredentialsIdentifier(r.Context(), identity.CredentialsTypeOIDC, uid(provider.Config().ID, claims.Subject)); err == nil {
 		// If the identity already exists, we should perform the login flow instead.
 
@@ -63,7 +64,7 @@ func (s *Strategy) processRegistration(w http.ResponseWriter, r *http.Request, a
 			return
 		}
 
-		s.processLogin(w, r, ar, claims, provider, container)
+		s.processLogin(w, r, ar, claims, provider, container, token)
 		return
 	}
 
@@ -133,7 +134,7 @@ func (s *Strategy) processRegistration(w http.ResponseWriter, r *http.Request, a
 	}
 
 	i.SetCredentials(s.ID(), *creds)
-	if err := s.d.RegistrationExecutor().PostRegistrationHook(w, r, identity.CredentialsTypeOIDC, a, i); err != nil {
+	if err := s.d.RegistrationExecutor().PostRegistrationOIDCHook(w, r, identity.CredentialsTypeOIDC, a, i, token, provider.Config().Provider); err != nil {
 		s.handleError(w, r, a.GetID(), provider.Config().ID, i.Traits, err)
 		return
 	}
